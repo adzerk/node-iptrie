@@ -5,7 +5,7 @@
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
  * met:
- *
+ * 
  *     * Redistributions of source code must retain the above copyright
  *       notice, this list of conditions and the following disclaimer.
  *     * Redistributions in binary form must reproduce the above
@@ -16,7 +16,7 @@
  *       of its contributors may be used to endorse or promote products
  *       derived from this software without specific prior written
  *       permission.
- *
+ * 
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -35,7 +35,6 @@
 #include <v8.h>
 #include <node.h>
 #include <node_object_wrap.h>
-#include <assert.h>
 
 using namespace v8;
 using namespace node;
@@ -44,23 +43,27 @@ class IPTrie : public ObjectWrap {
   public:
     static Persistent<FunctionTemplate> s_ct;
     static void
-    Initialize(v8::Handle<v8::Object> target) {
+    Initialize(v8::Local<v8::Object> target) {
       Isolate *isolate = target->GetIsolate();
       HandleScope scope(isolate);
 
       Local<FunctionTemplate> t = FunctionTemplate::New(isolate, New);
+      Local<String> name = CheckedString(isolate, "IPTrie");
       s_ct.Reset(isolate, t);
       t->InstanceTemplate()->SetInternalFieldCount(3);
-      t->SetClassName(String::NewFromUtf8(isolate, "IPTrie", String::kInternalizedString));
+      t->SetClassName(name);
 
       NODE_SET_PROTOTYPE_METHOD(t, "add", Add);
       NODE_SET_PROTOTYPE_METHOD(t, "del", Del);
       NODE_SET_PROTOTYPE_METHOD(t, "find", Find);
-      NODE_SET_PROTOTYPE_METHOD(t, "truncate", Truncate);
 
 
-      target->Set(String::NewFromUtf8(isolate, "IPTrie", String::kInternalizedString),
-                  t->GetFunction());
+      target->Set(isolate->GetCurrentContext(), name, t->GetFunction(isolate->GetCurrentContext()).ToLocalChecked())
+#ifdef NODE_VERSION_AT_LEAST(14, 0, 0)
+        .ToChecked();
+#else
+        .Check();
+#endif
     }
 
     struct obj_baton_t {
@@ -81,7 +84,7 @@ class IPTrie : public ObjectWrap {
       drop_tree(&tree6, delete_baton);
     }
 
-    int Add(const char *ip, int prefix, Handle<Value> dv) {
+    int Add(const char *ip, int prefix, Local<Value> dv) {
       int family, rv;
       union {
         struct in_addr addr4;
@@ -155,60 +158,68 @@ class IPTrie : public ObjectWrap {
       args.GetReturnValue().Set(args.This());
     }
 
+    static Local <String> CheckedString(Isolate *isolate, const char *str) {
+      return String::NewFromUtf8(isolate, "IPTrie", v8::NewStringType::kNormal)
+#ifdef NODE_VERSION_AT_LEAST(14, 0, 0)
+        .ToLocalChecked()
+#endif
+              ;
+    }
+
     static void Add(const FunctionCallbackInfo<Value> &args) {
       Isolate *isolate = args.GetIsolate();
       HandleScope scope(isolate);
 
       if (args.Length() < 1 || !args[0]->IsString()) {
         isolate->ThrowException(
-                Exception::TypeError(
-                    String::NewFromUtf8(isolate, "First argument must be an IP.")));
+          Exception::TypeError(
+            CheckedString(isolate, "First argument must be an IP.")));
         return;
       }
-      if (args.Length() < 2 || !args[1]->IsNumber()){
+      if (args.Length() < 2 || !args[1]->IsNumber()) {
         isolate->ThrowException(
           Exception::TypeError(
-            String::NewFromUtf8(isolate, "Second argument must be a prefix length")));
+            CheckedString(isolate, "Second argument must be a prefix length")));
         return;
       }
       if (args.Length() < 3) {
         isolate->ThrowException(
           Exception::TypeError(
-            String::NewFromUtf8(isolate, "Third argument must exist")));
+            CheckedString(isolate, "Third argument must exist")));
         return;
       }
 
-      String::Utf8Value ipaddress(args[0]->ToString());
-      int prefix_len = args[1]->ToUint32()->Value();
+      String::Utf8Value ipaddress(isolate, args[0]->ToString(isolate->GetCurrentContext()).ToLocalChecked());
+      int prefix_len = args[1]->Uint32Value(isolate->GetCurrentContext()).ToChecked();
 
       IPTrie *iptrie = ObjectWrap::Unwrap<IPTrie>(args.This());
-      Handle<Value> data = args[2];
-      if(iptrie->Add(*ipaddress, prefix_len, data) == 0) {
+      Local<Value>data = args[2];
+      if (iptrie->Add(*ipaddress, prefix_len, data) == 0) {
         isolate->ThrowException(
           Exception::TypeError(
-            String::NewFromUtf8(isolate, "Could not parse IP")));
+            CheckedString(isolate, "Could not parse IP")));
         return;
       }
     }
 
-    static void Del(const FunctionCallbackInfo<Value> &args) {
+    static void Del(const FunctionCallbackInfo <Value> &args) {
       Isolate *isolate = args.GetIsolate();
 
       if (args.Length() < 1 || !args[0]->IsString()) {
         isolate->ThrowException(
                 Exception::TypeError(
-                    String::NewFromUtf8(isolate, "First argument must be an IP.")));
+                    CheckedString(isolate, "First argument must be an IP.")));
         return;
       }
       if (args.Length() < 2 || !args[1]->IsNumber()){
         isolate->ThrowException(
-          Exception::TypeError(
-            String::NewFromUtf8(isolate, "Second argument must be a prefix length")));
+                Exception::TypeError(
+                  CheckedString(isolate, "Second argument must be a prefix length")));
         return;
       }
 
-      String::Utf8Value ipaddress(args[0]->ToString());
-      int prefix_len = args[1]->ToUint32()->Value();
+      String::Utf8Value ipaddress(isolate, args[0]->ToString(isolate->GetCurrentContext()).ToLocalChecked());
+      int prefix_len = args[1]->Uint32Value(isolate->GetCurrentContext()).ToChecked();
 
       IPTrie *iptrie = ObjectWrap::Unwrap<IPTrie>(args.This());
       int success = iptrie->Del(*ipaddress, prefix_len);
@@ -221,66 +232,20 @@ class IPTrie : public ObjectWrap {
 
       if (args.Length() < 1 || !args[0]->IsString()) {
         isolate->ThrowException(
-            Exception::TypeError(
-                String::NewFromUtf8(isolate, "Required argument: ip address.")));
+          Exception::TypeError(
+            CheckedString(isolate, "Required argument: ip address.")));
         return;
       }
 
-      String::Utf8Value ipaddress(args[0]->ToString());
+      String::Utf8Value ipaddress(isolate, args[0]->ToString(isolate->GetCurrentContext()).ToLocalChecked());
 
       IPTrie *iptrie = ObjectWrap::Unwrap<IPTrie>(args.This());
       obj_baton_t *d = iptrie->Find(*ipaddress);
       if(d != NULL) {
-        args.GetReturnValue().Set(d->val);
+        args.GetReturnValue().Set(d->val.Get(isolate));
       }
     }
 
-  static void Truncate(const FunctionCallbackInfo<Value> &args) {
-    Isolate *isolate = args.GetIsolate();
-
-    if (args.Length() < 1 || !args[0]->IsString()) {
-        isolate->ThrowException(
-            Exception::TypeError(
-                String::NewFromUtf8(isolate, "IPTrie required argument: ip address.")));
-      return;
-    }
-
-    String::Utf8Value ipaddress(args[0]->ToString());
-
-    int  family, rv;
-    char retval[16];
-    union {
-      struct in_addr addr4;
-      struct in6_addr addr6;
-    } a;
-
-    family = AF_INET;
-    rv = inet_pton(family, *ipaddress, &a);
-    if(rv != 1) {
-      family = AF_INET6;
-      rv = inet_pton(family, *ipaddress, &a);
-      if(rv != 1) {
-        isolate->ThrowException(
-            Exception::Error(
-                String::NewFromUtf8(isolate, "IPTrie: invalid ip address.")));
-        return;
-      }
-    }
-
-    if(family==AF_INET) {
-        uint32_t masked_ip = a.addr4.s_addr & 0x00FFFFFF;
-        inet_ntop(family, &masked_ip, retval, INET_ADDRSTRLEN);
-        v8::Local<v8::String> hTextJS = v8::String::NewFromUtf8(v8::Isolate::GetCurrent(), retval);
-        args.GetReturnValue().Set(hTextJS);
-    } else if (family==AF_INET6){
-        for (int i=15; i>5; i--) {
-            a.addr6.s6_addr[i] = 0;
-        }
-        inet_ntop(family, &a.addr6.s6_addr, retval, INET6_ADDRSTRLEN);
-        v8::Local<v8::String> hTextJS = v8::String::NewFromUtf8(v8::Isolate::GetCurrent(), retval);
-        args.GetReturnValue().Set(hTextJS);
-    }
-  }
   private:
     btrie tree4;
     btrie tree6;
@@ -289,7 +254,7 @@ class IPTrie : public ObjectWrap {
 Persistent<FunctionTemplate> IPTrie::s_ct;
 
 extern "C" {
-static void init(Handle<Object> target) {
+static void init(Local<Object> target) {
   IPTrie::Initialize(target);
 }
 NODE_MODULE(iptrie, init);
