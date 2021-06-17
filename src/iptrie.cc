@@ -56,6 +56,7 @@ class IPTrie : public ObjectWrap {
       NODE_SET_PROTOTYPE_METHOD(t, "add", Add);
       NODE_SET_PROTOTYPE_METHOD(t, "del", Del);
       NODE_SET_PROTOTYPE_METHOD(t, "find", Find);
+      NODE_SET_PROTOTYPE_METHOD(t, "truncate", Truncate);
 
 
       target->Set(isolate->GetCurrentContext(), name, t->GetFunction(isolate->GetCurrentContext()).ToLocalChecked())
@@ -245,7 +246,52 @@ class IPTrie : public ObjectWrap {
         args.GetReturnValue().Set(d->val.Get(isolate));
       }
     }
+  static void Truncate(const FunctionCallbackInfo<Value> &args) {
+    Isolate *isolate = args.GetIsolate();
 
+    if (args.Length() < 1 || !args[0]->IsString()) {
+        isolate->ThrowException(
+            Exception::TypeError(
+                String::NewFromUtf8(isolate, "IPTrie required argument: ip address.")));
+      return;
+    }
+
+    String::Utf8Value ipaddress(args[0]->ToString());
+
+    int  family, rv;
+    char retval[16];
+    union {
+      struct in_addr addr4;
+      struct in6_addr addr6;
+    } a;
+
+    family = AF_INET;
+    rv = inet_pton(family, *ipaddress, &a);
+    if(rv != 1) {
+      family = AF_INET6;
+      rv = inet_pton(family, *ipaddress, &a);
+      if(rv != 1) {
+        isolate->ThrowException(
+            Exception::Error(
+                String::NewFromUtf8(isolate, "IPTrie: invalid ip address.")));
+        return;
+      }
+    }
+
+    if(family==AF_INET) {
+        uint32_t masked_ip = a.addr4.s_addr & 0x00FFFFFF;
+        inet_ntop(family, &masked_ip, retval, INET_ADDRSTRLEN);
+        v8::Local<v8::String> hTextJS = v8::String::NewFromUtf8(v8::Isolate::GetCurrent(), retval);
+        args.GetReturnValue().Set(hTextJS);
+    } else if (family==AF_INET6){
+        for (int i=15; i>5; i--) {
+            a.addr6.s6_addr[i] = 0;
+        }
+        inet_ntop(family, &a.addr6.s6_addr, retval, INET6_ADDRSTRLEN);
+        v8::Local<v8::String> hTextJS = v8::String::NewFromUtf8(v8::Isolate::GetCurrent(), retval);
+        args.GetReturnValue().Set(hTextJS);
+    }
+  }
   private:
     btrie tree4;
     btrie tree6;
